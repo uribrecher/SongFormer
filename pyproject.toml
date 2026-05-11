@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "songformer"
-version = "0.1.0"
+version = "0.2.0"
 description = "Music structure analysis — installable wrapper around the SongFormer research code (ASLP-lab)."
 readme = "README.md"
 requires-python = ">=3.11"
