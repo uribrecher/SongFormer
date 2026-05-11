@@ -19,13 +19,12 @@ from typing import Callable, TypeAlias
 
 import numpy as np
 
+# Type alias for the optional progress callback accepted by
+# ``SongFormerPipeline.analyze()``. Signature: ``progress(stage, fraction)``
+# where ``stage`` is one of ``load_audio | encode | infer | postprocess | done``
+# and ``fraction`` is in ``[0.0, 1.0]``, monotonically non-decreasing across
+# a single call. See the ``analyze()`` docstring for the contract.
 ProgressFn: TypeAlias = Callable[[str, float], None]
-"""Optional callback for `analyze()` progress.
-
-Signature: ``progress(stage: str, fraction: float)`` where ``stage`` is one of
-``load_audio | encode | infer | postprocess | done`` and ``fraction`` is in
-``[0.0, 1.0]``. Always monotonically non-decreasing across a single call.
-"""
 
 # msaf transitively reads ``scipy.inf`` which was removed in modern scipy.
 # Patch BEFORE importing the upstream model module that imports msaf at top level.
@@ -180,6 +179,19 @@ class SongFormerPipeline:
         audio_path: str | os.PathLike[str],
         progress: ProgressFn | None = None,
     ) -> AnalysisResult:
+        """Run music structure analysis on ``audio_path``.
+
+        Args:
+            audio_path: Path to a readable audio file.
+            progress: Optional callback ``(stage, fraction) -> None``. ``stage``
+                is one of ``load_audio | encode | infer | postprocess | done``;
+                ``fraction`` is in ``[0.0, 1.0]`` and monotonically
+                non-decreasing within a single call. Exceptions raised by the
+                callback are swallowed so a broken sink can't break inference.
+
+        Returns:
+            AnalysisResult with `segments` and `duration`.
+        """
         from postprocessing.functional import postprocess_functional_structure
 
         def emit(stage: str, fraction: float) -> None:
@@ -227,11 +239,24 @@ class SongFormerPipeline:
         # generous on the last outer iteration (real inner count may be lower for
         # short songs), so the fraction reported is conservative — we clamp at
         # 0.95 below to leave headroom for post-processing.
+        # Each outer iter emits 2 encode events for the full-window forwards
+        # (MuQ then MusicFM), 2 encode events per inner 30s sub-window (MuQ
+        # then MusicFM), and 1 infer event for the MSA forward.
         n_outer = max(1, total_len // hop_size)
         inner_per_outer = hop_size // 30
-        total_steps = max(1, n_outer * (2 + inner_per_outer + 1))
+        total_steps = max(1, n_outer * (2 + 2 * inner_per_outer + 1))
         step = 0
         main_lo, main_hi = 0.05, 0.95  # progress band reserved for the main loop
+
+        def emit_main(stage: str) -> None:
+            # `step / total_steps` is always <= 1 by construction (total_len
+            # rounds up so n_outer >= actual outer iters, inner_per_outer
+            # equals hop_size // 30 == the inner range length, and we emit at
+            # most that many events per iter). The explicit min() is defensive:
+            # if a future refactor breaks the invariant, we still respect the
+            # band rather than letting `postprocess` regress to a lower value.
+            f = main_lo + (step / total_steps) * (main_hi - main_lo)
+            emit(stage, min(f, main_hi))
 
         lens = 0
         i = 0
@@ -250,13 +275,13 @@ class SongFormerPipeline:
                 muq_embd_420s = muq_out["hidden_states"][10]
                 del muq_out
                 step += 1
-                emit("encode", main_lo + (step / total_steps) * (main_hi - main_lo))
+                emit_main("encode")
 
                 _, musicfm_hidden = self.musicfm.get_predictions(audio_seg.unsqueeze(0))
                 musicfm_embd_420s = musicfm_hidden[10]
                 del musicfm_hidden
                 step += 1
-                emit("encode", main_lo + (step / total_steps) * (main_hi - main_lo))
+                emit_main("encode")
 
                 wraped_muq_30s = []
                 wraped_musicfm_30s = []
@@ -276,11 +301,13 @@ class SongFormerPipeline:
                             "hidden_states"
                         ][10]
                     )
+                    step += 1
+                    emit_main("encode")
                     wraped_musicfm_30s.append(
                         self.musicfm.get_predictions(audio[s30:e30].unsqueeze(0))[1][10]
                     )
                     step += 1
-                    emit("encode", main_lo + (step / total_steps) * (main_hi - main_lo))
+                    emit_main("encode")
 
                 wraped_muq = torch.concatenate(wraped_muq_30s, dim=1)
                 wraped_musicfm = torch.concatenate(wraped_musicfm_30s, dim=1)
@@ -296,7 +323,7 @@ class SongFormerPipeline:
                     with_logits=True,
                 )
                 step += 1
-                emit("infer", main_lo + (step / total_steps) * (main_hi - main_lo))
+                emit_main("infer")
 
                 start_frame = int(i * _AFTER_DOWNSAMPLING_FRAME_RATES)
                 end_frame = start_frame + min(
