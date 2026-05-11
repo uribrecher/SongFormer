@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "songformer"
+version = "0.1.0"
+description = "Music structure analysis — installable wrapper around the SongFormer research code (ASLP-lab)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "torch>=2.4",
+    "torchaudio>=2.4",
+    "librosa>=0.11",
+    "muq>=0.1",
+    "transformers>=4.51",
+    "huggingface-hub",
+    "safetensors",
+    "x-transformers>=2.4",
+    "ema-pytorch>=0.7",
+    "omegaconf",
+    "scipy",
+    "numpy",
+    "pydantic>=2.0",
+    "msaf",
+    "tqdm",
+    "loguru",
+]
+
+[project.scripts]
+songformer-download = "songformer.download:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["songformer*"]
+
+[tool.setuptools.package-data]
+"songformer" = ["configs/*.yaml"]

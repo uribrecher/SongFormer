@@ -39,7 +39,13 @@ class Head(nn.Module):
 
 class WrapedTransformerEncoder(nn.Module):
     def __init__(
-        self, input_dim, transformer_input_dim, num_layers=1, nhead=8, dropout=0.1
+        self,
+        input_dim,
+        transformer_input_dim,
+        num_layers=1,
+        nhead=8,
+        dropout=0.1,
+        attn_flash: bool = True,
     ):
         super().__init__()
         self.input_dim = input_dim
@@ -63,7 +69,7 @@ class WrapedTransformerEncoder(nn.Module):
             layer_dropout=dropout,
             attn_dropout=dropout,
             ff_dropout=dropout,
-            attn_flash=True,
+            attn_flash=attn_flash,
             rotary_pos_emb=True,
         )
 
@@ -271,6 +277,7 @@ class Model(nn.Module):
             num_layers=config.num_transformer_layers,
             nhead=config.transformer_nhead,
             dropout=config.transformer_dropout,
+            attn_flash=bool(getattr(config, "attn_flash", True)),
         )
         self.boundary_TVLoss1D = TVLoss1D(
             beta=config.boundary_tv_loss_beta,
