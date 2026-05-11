@@ -2,6 +2,11 @@
 __pycache__/
 *.py[cod]
 
+# Package build artifacts
+*.egg-info/
+build/
+dist/
+
 # Virtual environment
 venv/
 ENV/
